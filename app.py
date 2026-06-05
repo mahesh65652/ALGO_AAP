@@ -1,51 +1,51 @@
 import streamlit as st
 
-# એપનું સેટિંગ
 st.set_page_config(page_title="Ramavat Algo", page_icon="📈", layout="centered")
 
-# મુખ્ય હેડિંગ
 st.title("🛢 Ramavat Algo Control Panel")
 
-# --- સિક્યોરિટી લોક (Password System) ---
+# લોગિન સિસ્ટમ
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
-    st.subheader("🔐 સિક્યોરિટી લોગિન")
-    password = st.text_input("સાહેબ, તમારો પર્સનલ પાસવર્ડ નાખો:", type="password")
-    login_button = st.button("એપ ચાલુ કરો")
-    
-    # અહીં તમે તમારો મનપસંદ પાસવર્ડ બદલી શકો છો (અત્યારે '1234' રાખ્યો છે)
-    if login_button:
-        if password == "1234":
+    password = st.text_input("પાસવર્ડ નાખો:", type="password")
+    if st.button("એપ અનલોક કરો"):
+        if password == "1234": # અહીં તમારો પાસવર્ડ બદલી શકો છો
             st.session_state["authenticated"] = True
             st.rerun()
         else:
-            st.error("❌ ખોટો પાસવર્ડ! સરખો પાસવર્ડ નાખો સાહેબ.")
+            st.error("ખોટો પાસવર્ડ!")
 else:
-    # --- પાસવર્ડ સાચો પડે પછી આ અસલી ડેશબોર્ડ દેખાશે ---
-    st.success("🔓 લોગિન સફળ! વેલકમ સાહેબ.")
+    st.success("લોગિન સફળ!")
     
-    st.divider()
-
-    # લાઈવ ડેટાનું બોક્સ
-    st.subheader("📊 આજનો લાઈવ પ્રોફિટ / લોસ")
-    
-    # અહીં આપણે ભવિષ્યમાં ગૂગલ શીટ કે બ્રોકર માંથી લાઈવ P&L લાવીશું
-    st.metric(label="Total P&L (Testing Mode)", value="+₹ 2,500.00", delta="Live")
+    # 1. લાઈવ ડેશબોર્ડ
+    st.subheader("📊 ટ્રેડિંગ ડેશબોર્ડ")
+    col1, col2 = st.columns(2)
+    col1.metric("આજનો પ્રોફિટ", "₹ 2,500", "+1.2%")
+    col2.metric("એક્ટિવ ટ્રેડ્સ", "2", "Running")
 
     st.divider()
 
-    # બોટ કંટ્રોલ સ્વીચ
-    st.subheader("🤖 Bot Control")
-    bot_status = st.toggle("Volatility Scanner Bot ચાલુ કરો")
-
-    if bot_status:
-        st.success("🚀 બોટ બેકએન્ડમાં સિગ્નલ સ્કેન કરી રહ્યો છે...")
-    else:
-        st.error("🛑 બોટ અત્યારે બંધ છે.")
+    # 2. કંટ્રોલ બટનો
+    st.subheader("⚙️ કંટ્રોલ પેનલ")
+    
+    if st.button("🚀 બોટ સ્ટાર્ટ કરો"):
+        st.success("બોટ એક્ટિવ થઈ ગયો છે!")
+    
+    if st.button("🛑 બધા ટ્રેડ બંધ કરો (Emergency)"):
+        st.warning("ચેતવણી: બધા ઓપન પોઝિશન ક્લોઝ કરી રહ્યા છીએ...")
         
-    # લોગઆઉટ બટન
-    if st.button("લોગઆઉટ (Lock App)"):
+    if st.button("🔄 ડેટા રિફ્રેશ કરો"):
+        st.rerun()
+
+    st.divider()
+
+    # 3. મેનુ સેટિંગ્સ
+    if st.checkbox("બોટ સેટિંગ્સ બતાવો"):
+        st.text_input("સ્કેનિંગ સમયગાળો (સેકન્ડ)", "5")
+        st.slider("રિસ્ક લેવલ", 1, 10, 5)
+
+    if st.button("લોગઆઉટ"):
         st.session_state["authenticated"] = False
         st.rerun()
