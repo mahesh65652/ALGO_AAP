@@ -74,6 +74,13 @@ _def = {
     "telegram_token": "",
     "telegram_chat_id": "",
     "telegram_alerts": False,
+    # ===== CHART SETTINGS =====
+    "chart_interval": "5",
+    "chart_style": "1",
+    "chart_type": "candlestick",
+    "chart_show_grid": True,
+    "chart_show_volume": True,
+    "chart_show_indicators": True,
 }
 
 for k,v in _def.items():
@@ -420,11 +427,13 @@ with col_chart:
     with cs2:
         otype = st.selectbox("Type:", ["FUT","CE","PE","EQUITY"], key="otype", label_visibility="collapsed")
     
-    # TradingView Chart
+    # TradingView Chart with Dynamic Settings
     tv = get_tv_symbol(usym)
+    chart_url = f"https://s.tradingview.com/widgetembed/?symbol={tv}&interval={st.session_state['chart_interval']}&theme={'dark' if st.session_state['theme']=='dark' else 'light'}&style={st.session_state['chart_style']}&timezone=Asia%2FKolkata&locale=en&allow_symbol_change=true"
+    
     st.components.v1.html(f"""
     <div style="height:550px;border-radius:12px;overflow:hidden;border:2px solid {colors['border']};">
-        <iframe src="https://s.tradingview.com/widgetembed/?symbol={tv}&interval=5&theme={'dark' if st.session_state['theme']=='dark' else 'light'}&style=1&timezone=Asia%2FKolkata&locale=en&allow_symbol_change=1"
+        <iframe src="{chart_url}"
             width="100%" height="100%" frameborder="0" allowtransparency="true" scrolling="no" allowfullscreen>
         </iframe>
     </div>""", height=560)
@@ -452,6 +461,37 @@ with col_ctrl:
                 st.rerun()
             else:
                 st.error("❌ Client ID અને API Key ભરો!")
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    # CHART SETTINGS ⭐⭐⭐ NEW
+    with st.expander("📊 Chart Settings", expanded=True):
+        st.markdown(f"<div class='config-box'>", unsafe_allow_html=True)
+        st.markdown(f"<h4 style='color:{colors['text_accent']};margin-bottom:15px;'>⚙️ TradingView Configuration</h4>", unsafe_allow_html=True)
+        
+        st.session_state["chart_interval"] = st.selectbox(
+            "📌 Timeframe:",
+            ["1", "5", "15", "30", "60", "240", "D", "W", "M"],
+            index=["1", "5", "15", "30", "60", "240", "D", "W", "M"].index(st.session_state["chart_interval"]),
+            key="chart_int"
+        )
+        
+        st.session_state["chart_style"] = st.selectbox(
+            "🎨 Chart Style:",
+            {"Candlesticks": "1", "Bars": "2", "Line": "3", "Area": "4"}.items(),
+            format_func=lambda x: x[0],
+            key="chart_stl"
+        )[1]
+        
+        st.session_state["chart_show_volume"] = st.toggle("📊 Show Volume", st.session_state["chart_show_volume"], key="vol_tog")
+        st.session_state["chart_show_grid"] = st.toggle("📏 Show Grid", st.session_state["chart_show_grid"], key="grid_tog")
+        st.session_state["chart_show_indicators"] = st.toggle("📈 Show Indicators", st.session_state["chart_show_indicators"], key="ind_tog")
+        
+        if st.button("💾 Apply Settings", key="chart_save", use_container_width=True):
+            add_log("CHART_SAVED", f"Interval: {st.session_state['chart_interval']}, Style: {st.session_state['chart_style']}")
+            st.success("✅ Chart Updated!")
+            time.sleep(0.3)
+            st.rerun()
+        
         st.markdown("</div>", unsafe_allow_html=True)
     
     # TELEGRAM ALERTS
