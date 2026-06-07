@@ -434,3 +434,29 @@ if st.session_state["open_positions"]:
     df = pd.DataFrame([{
         "Trade ID":p["id"],"Script":p["script"],"Qty":p["qty"],
         "Action":p["action"],"SL":p["sl_pts"],"TGT":p["tgt_pts"],
+        "Mode":p["mode"],"Status":p["status"],
+    } for p in st.session_state["open_positions"]])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    if st.button("🗑️ Clear Positions", use_container_width=True):
+        add_log("CLEAR", f"{len(st.session_state['open_positions'])} cleared")
+        st.session_state["open_positions"] = []; st.rerun()
+else:
+    st.info("📭 કોઈ Open Position નથી. Order place karvo!")
+
+# AUDIT LOGS
+st.markdown("<br>", unsafe_allow_html=True)
+with st.expander("📝 Audit Logs"):
+    logs = st.session_state["audit_logs"]
+    if logs:
+        st.dataframe(
+            pd.DataFrame(list(reversed(logs[-25:])))[["timestamp","action","details"]],
+            use_container_width=True, hide_index=True)
+    else:
+        st.info("📭 No logs yet.")
+
+st.markdown("""
+<hr style='border-color:#1e366a;margin-top:30px;'>
+<div style='text-align:center;color:#9ca3af;font-size:12px;padding:20px 0;'>
+    <p>🔱 Ramavat Algo Elite v2.0 &nbsp;|&nbsp; NSE • MCX • Equity</p>
+    <p>© 2026 All Rights Reserved &nbsp;|&nbsp; ⚠️ Trading involves risk.</p>
+</div>""", unsafe_allow_html=True)
