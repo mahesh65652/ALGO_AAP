@@ -81,6 +81,9 @@ _def = {
     "chart_show_grid": True,
     "chart_show_volume": True,
     "chart_show_indicators": True,
+    # ===== STRATEGY SETTINGS =====
+    "current_active_strategy": "MCX Intraday Classic v3.0",
+    "strategy_deployed": False,
 }
 
 for k,v in _def.items():
@@ -158,6 +161,33 @@ def generate_css(theme_colors):
             background-color:{theme_colors['bg_secondary']} !important; padding:15px !important;
             border-radius:10px !important; border:1px solid {theme_colors['border']} !important;
             margin-bottom:15px !important;
+        }}
+        
+        /* Strategy Dock Box */
+        .strategy-dock {{
+            background: linear-gradient(135deg, {theme_colors['bg_secondary']}, {theme_colors['bg_tertiary']}) !important;
+            padding: 18px !important; border-radius: 12px !important;
+            border: 2px solid {theme_colors['text_accent']} !important;
+            margin: 15px 0 !important; box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+        }}
+        
+        /* Strategy Buttons */
+        .strategy-change-btn button {{
+            background: linear-gradient(90deg, #1e40af, #3b82f6) !important;
+            color: white !important; font-weight: 700 !important;
+        }}
+        .strategy-change-btn button:hover {{
+            background: linear-gradient(90deg, #1e3a8a, #2563eb) !important;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4) !important;
+        }}
+        
+        .strategy-deploy-btn button {{
+            background: linear-gradient(90deg, #7c3aed, #a855f7) !important;
+            color: white !important; font-weight: 700 !important;
+        }}
+        .strategy-deploy-btn button:hover {{
+            background: linear-gradient(90deg, #6d28d9, #9333ea) !important;
+            box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4) !important;
         }}
         
         /* Alerts */
@@ -429,7 +459,7 @@ with col_chart:
     
     # TradingView Chart with Dynamic Settings
     tv = get_tv_symbol(usym)
-    chart_url = f"https://s.tradingview.com/widgetembed/?symbol={tv}&interval={st.session_state['chart_interval']}&theme={'dark' if st.session_state['theme']=='dark' else 'light'}&style={st.session_state['chart_style']}&timezone=Asia%2FKolkata&locale=en&allow_symbol_change=true"
+    chart_url = f"https://s.tradingview.com/widgetembed/?symbol={tv}&interval={st.session_state['chart_interval']}&theme={'dark' if st.session_state['theme']=='dark' else 'light'}&style={st.session_state['chart_style']}"
     
     st.components.v1.html(f"""
     <div style="height:550px;border-radius:12px;overflow:hidden;border:2px solid {colors['border']};">
@@ -624,6 +654,71 @@ if st.button("💥 EMERGENCY CLOSE ALL POSITIONS", key="panic", use_container_wi
     time.sleep(0.3)
     st.rerun()
 st.markdown("</div>", unsafe_allow_html=True)
+
+# ============================================================================
+# ADVANCE STRATEGY DEPLOYMENT DOCK ⭐⭐⭐ NEW
+# ============================================================================
+st.markdown("<br>", unsafe_allow_html=True)
+with st.expander("⚙️ Advance Strategy Control Panel (Hidden Options)", expanded=False):
+    st.markdown('<div class="strategy-dock">', unsafe_allow_html=True)
+    
+    st.markdown(f"<h4 style='color:{colors['text_accent']};margin-bottom:15px;text-align:center;'>🤖 Strategy Deployment Interface</h4>", unsafe_allow_html=True)
+    
+    # Strategy Dropdown
+    strategy_options = [
+        "MCX Intraday Classic v3.0",
+        "Nifty SuperTrend Scalper",
+        "BankNifty Breakout Rider",
+        "Price Action Pro"
+    ]
+    
+    selected_strategy = st.selectbox(
+        "📋 Select Strategy:",
+        strategy_options,
+        index=strategy_options.index(st.session_state["current_active_strategy"]),
+        key="strategy_select"
+    )
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Strategy Action Buttons (Side by Side)
+    strat_btn1, strat_btn2 = st.columns(2)
+    
+    with strat_btn1:
+        st.markdown('<div class="strategy-change-btn">', unsafe_allow_html=True)
+        if st.button("🔄 CHANGE STRATEGY", key="change_strategy", use_container_width=True):
+            st.session_state["current_active_strategy"] = selected_strategy
+            add_log("STRATEGY_CHANGED", f"Changed to: {selected_strategy}")
+            st.toast(f"✅ Strategy Changed to {selected_strategy}!", icon="🔄")
+            time.sleep(0.5)
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with strat_btn2:
+        st.markdown('<div class="strategy-deploy-btn">', unsafe_allow_html=True)
+        if st.button("🚀 DEPLOY LIVE STRATEGY", key="deploy_strategy", use_container_width=True):
+            st.session_state["strategy_deployed"] = True
+            add_log("STRATEGY_DEPLOYED", f"Deployed: {selected_strategy}")
+            send_telegram_alert(f"🚀 <b>STRATEGY DEPLOYED:</b>\n{selected_strategy}\nStatus: LIVE 🔴")
+            st.balloons()
+            st.success(f"✅ {selected_strategy} Deployed Successfully!\n🟢 Strategy is now LIVE and running.")
+            time.sleep(1)
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # Strategy Status Display
+    st.markdown(f"""
+    <div style='background:{colors['bg_secondary']};padding:12px;border-radius:8px;border:1px solid {colors['border']};text-align:center;'>
+        <p style='color:{colors['text_secondary']};font-size:12px;margin:0 0 8px 0;'>CURRENT STRATEGY STATUS</p>
+        <p style='color:{colors['text_accent']};font-size:14px;font-weight:700;margin:0;'>{st.session_state['current_active_strategy']}</p>
+        <p style='color:{colors['success'] if st.session_state['strategy_deployed'] else colors['text_secondary']};font-size:12px;margin:8px 0 0 0;'>
+        {'🟢 LIVE' if st.session_state['strategy_deployed'] else '🔴 IDLE'}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown(f"<hr style='border-color:{colors['border']};margin:20px 0;'>", unsafe_allow_html=True)
 
