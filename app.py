@@ -675,15 +675,32 @@ with col_chart:
         unsafe_allow_html=True)
 
     tv_sym = get_tradingview_symbol(user_symbol)
-    st.components.v1.html(f"""
-    <div style="height:520px;border-radius:12px;overflow:hidden;border:1px solid #1e366a;">
-        <iframe
-            src="https://s.tradingview.com/widgetembed/?symbol={tv_sym}&interval=5&theme=dark&style=1&timezone=Asia%2FKolkata&locale=en&hide_side_toolbar=0&allow_symbol_change=1"
-            width="100%" height="100%"
-            frameborder="0" allowtransparency="true"
-            scrolling="no" allowfullscreen>
-        </iframe>
-    </div>""", height=530)
+    
+    # એડવાન્સ વિજેટ સ્ક્રિપ્ટ જે સાચો ઇન્ડિયન ટાઈમઝોન અને લાઈવ ડેટા લોડ કરશે
+    chart_html = f"""
+    <div style="height:520px; border-radius:12px; overflow:hidden; border:1px solid #1e366a;">
+        <div id="tradingview_chart" style="height:100%; width:100%;"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+        new TradingView.widget({{
+          "width": "100%",
+          "height": "100%",
+          "symbol": "{tv_sym}",
+          "interval": "5",
+          "timezone": "Asia/Kolkata",
+          "theme": "dark",
+          "style": "1",
+          "locale": "en",
+          "toolbar_bg": "#f1f3f6",
+          "enable_publishing": false,
+          "hide_side_toolbar": false,
+          "allow_symbol_change": true,
+          "container_id": "tradingview_chart"
+        }});
+        </script>
+    </div>
+    """
+    st.components.v1.html(chart_html, height=530)
 # ══════════════════════════════════════════════════════════════════
 # OPEN POSITIONS TABLE
 # ══════════════════════════════════════════════════════════════════
