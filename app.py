@@ -221,3 +221,26 @@ with col_chart:
     </div>
     """
     st.components.v1.html(chart_html, height=580, scrolling=False)
+    # 🌟 STEP 4: 3D TRADING BUTTONS WITH REAL PUNCH LOGIC
+    st.markdown("<h4>⚡ STEP 4: MANUAL EXECUTION OVERRIDE</h4>", unsafe_allow_html=True)
+    st.markdown("<div class='config-box'>", unsafe_allow_html=True)
+    b1, b2 = st.columns(2)
+    with b1:
+        st.markdown('<div class="buy-box">', unsafe_allow_html=True)
+        if st.button("BUY", use_container_width=True):
+            status, msg = orders.place_market_order(st.session_state["active_broker"], user_symbol, u_lots, "BUY")
+            if status:
+                st.toast(msg, icon="🚀")
+            else:
+                st.error(msg)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with b2:
+        st.markdown('<div class="sell-box">', unsafe_allow_html=True)
+        if st.button("SELL", use_container_width=True):
+            status, msg = orders.place_market_order(st.session_state["active_broker"], user_symbol, u_lots, "SELL")
+            if status:
+                st.toast(msg, icon="🚨")
+            else:
+                st.error(msg)
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
