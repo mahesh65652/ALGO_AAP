@@ -1,1 +1,1 @@
-pip install reportlab python-docx streamlit
+pip install streamlit python-docx weasyprint
