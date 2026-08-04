@@ -1,1 +1,2 @@
-pip install streamlit python-docx weasyprint
+streamlit
+python-docx
