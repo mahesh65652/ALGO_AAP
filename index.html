@@ -4,15 +4,114 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>લીગલ સોફ્ટવેર</title>
-  
-  <!-- CSS ફાઇલ લિંક કરવા માટે -->
-  <link rel="stylesheet" href="css/style.css">
+
+  <!-- static/style.css સાથે સાચી રીતે લિંક કરેલું -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
-  <!-- તમારો HTML કોડ અહીં આવશે -->
+  <div class="app-container">
+    
+    <!-- ૧. ડાબી બાજુનું પેનલ (સાઈડબાર) -->
+    <aside class="sidebar">
+      <h2>⚖️ લીગલ સોફ્ટવેર</h2>
+      
+      <!-- એકાઉન્ટ / લોગિન વિભાગ -->
+      <div class="card">
+        <h3>🔐 સાઈન ઇન / એકાઉન્ટ</h3>
+        <p>પસંદ કરો:</p>
+        <div class="radio-group">
+          <label><input type="radio" name="login_type" checked> લોગિન (Login)</label>
+          <label><input type="radio" name="login_type"> નવું એકાઉન્ટ</label>
+        </div>
+        
+        <div class="form-group">
+          <label>યુઝરનામ</label>
+          <input type="text" placeholder="તમારું યુઝરનામ લખો">
+        </div>
 
-  <!-- જો JS ફાઇલ હોય તો body પૂરા થાય તે પહેલાં લિંક કરવી -->
-  <script src="js/script.js"></script>
+        <div class="form-group">
+          <label>પાસવર્ડ</label>
+          <input type="password" placeholder="પાસવર્ડ લખો">
+        </div>
+
+        <button class="btn btn-red">🔒 લોગિન કરો</button>
+      </div>
+
+      <!-- પોર્ટલ મેનૂ -->
+      <div class="card menu-item">📂 જમીન & મહેસૂલી પોર્ટલ્સ</div>
+      <div class="card menu-item">⚖️ ઈ-કોર્ટ્સ & સરકારી પોર્ટલ</div>
+
+      <div class="card">
+        <h3>🎁 સરકારી યોજનાઓ (જન કલ્યાણ)</h3>
+        <button class="btn btn-outline">🖥️ ડિજિટલ ગુજરાત પેન્શન પોર્ટલ</button>
+        <button class="btn btn-outline">🏥 આયુષ્માન ભારત યોજના</button>
+        <button class="btn btn-outline">🏠 પ્રધાનમંત્રી આવાસ યોજના</button>
+      </div>
+    </aside>
+
+    <!-- ૨. વચલું પેનલ (ફોર્મ અને વિગત) -->
+    <main class="main-content">
+      <h2>વિગત પસંદ કરો અને ભરો</h2>
+
+      <div class="form-group">
+        <label>દસ્તાવેજ / અરજીનો પ્રકાર પસંદ કરો</label>
+        <select class="dropdown">
+          <option value="">-- પસંદ કરો --</option>
+          <option value="1">દસ્તાવેજ પ્રકાર ૧</option>
+          <option value="2">દસ્તાવેજ પ્રકાર ૨</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>કોર્ટ / કચેરી / ઓથોરિટીનું નામ:</label>
+        <input type="text" placeholder="DILR કચેરી / ...">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group half">
+          <label>અરજદારનું નામ:</label>
+          <input type="text" placeholder="મહેશ">
+        </div>
+        <div class="form-group half">
+          <label>સામાવાળાનું નામ:</label>
+          <input type="text" placeholder="સામાવાળાનું નામ">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>કેસ / નોટિસ / રેકોર્ડ નંબર:</label>
+        <input type="text" placeholder="સર્વે/કરાર નંબર">
+      </div>
+
+      <div class="draft-preview">
+        <h3>કાનૂની લખાણ (ડ્રાફ્ટિંગ)</h3>
+        <p><strong>મુખ્ય બાબત:</strong></p>
+        <p>શ્રીમાન મામલતદાર સાહેબશ્રી,<br>તાલુકા સેવા સદન-૧</p>
+        <hr>
+        <p>વિષય: હક્ક પત્રક કચેરીની નોંધણી નોંધ બાબત...</p>
+      </div>
+    </main>
+
+    <!-- ૩. જમણી બાજુનું પેનલ (ડાઉનલોડ અને પ્રિન્ટ) -->
+    <aside class="right-panel">
+      <h2>પ્રિવ્યૂ અને ડાઉનલોડ</h2>
+      
+      <div class="download-box">
+        <p>📄 <strong>૧. Word (.docx) ફાઇલ ડાઉનલોડ કરો</strong></p>
+      </div>
+
+      <div class="download-box">
+        <p>📄 <strong>૨. ડાયરેક્ટ PDF પ્રિન્ટ કરો</strong></p>
+        <button class="btn btn-red">🖨️ આ દસ્તાવેજ પ્રિન્ટ કરો</button>
+      </div>
+
+      <div class="info-card">
+        ℹ️ દસ્તાવેજ સેવ કરવા માટે ડાબી બાજુ લોગિન કરો.
+      </div>
+    </aside>
+
+  </div>
+
 </body>
 </html>
