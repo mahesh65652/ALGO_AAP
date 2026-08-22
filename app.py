@@ -1,0 +1,899 @@
+import streamlit as st
+from docx import Document
+from docx.shared import Pt, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+import io
+import sqlite3
+import hashlib
+import streamlit.components.v1 as components
+
+# ── PAGE CONFIG ────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="ગુજરાત લીગલ પોર્ટલ",
+    page_icon="⚖️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ── CUSTOM CSS ─────────────────────────────────────────────────────
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #0e1117 !important;
+        color: #ffffff !important;
+        max-width: 100vw;
+        overflow-x: hidden !important;
+    }
+    h1, h2, h3, h4, h5, h6, span, label, p {
+        color: #ffffff !important;
+    }
+    .stTextInput input, .stTextArea textarea {
+        color: #ffffff !important;
+        background-color: #1e222d !important;
+        border-radius: 8px !important;
+    }
+    .stButton>button {
+        border-radius: 8px;
+        font-weight: bold;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 6px 6px 0px 0px;
+        padding: 10px 20px;
+        background-color: #1e222d;
+        color: #ffffff !important;
+    }
+    /* Big document-type selector buttons */
+    div[data-testid="stButton"] > button {
+        width: 100%;
+        min-height: 64px;
+        font-size: 15px !important;
+        white-space: normal;
+        line-height: 1.3;
+    }
+    div[data-testid="stButton"] > button[kind="primary"] {
+        background-color: #16a34a !important;
+        border: 3px solid #4ade80 !important;
+        color: #ffffff !important;
+    }
+    /* Category pill buttons */
+    .cat-btn button {
+        min-height: 46px !important;
+        font-size: 14px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# ── DATABASE SETUP ─────────────────────────────────────────────────
+DB_FILE = "legal_drafts_secure_v6.db"
+
+def init_db():
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                doc_type TEXT NOT NULL,
+                court_name TEXT,
+                applicant_name TEXT,
+                opposite_party TEXT,
+                case_number TEXT,
+                doc_body TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (username) REFERENCES users (username)
+            )
+        """)
+        c.execute("SELECT COUNT(*) FROM users")
+        if c.fetchone()[0] == 0:
+            admin_pass = hashlib.sha256("admin123_secure_salt".encode()).hexdigest()
+            c.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", ("admin", admin_pass, "admin"))
+
+init_db()
+
+def hash_password(password):
+    return hashlib.sha256(f"{password}_secure_salt".encode()).hexdigest()
+
+def verify_user(username, password):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("SELECT password_hash, role FROM users WHERE username = ?", (username,))
+        res = c.fetchone()
+        if res and res[0] == hash_password(password):
+            return res[1]
+    return None
+
+def register_user(username, password, role="client"):
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                      (username, hash_password(password), role))
+            return True
+    except sqlite3.IntegrityError:
+        return False
+
+def save_user_draft(username, doc_type, court_name, applicant_name, opposite_party, case_number, doc_body):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO drafts (username, doc_type, court_name, applicant_name, opposite_party, case_number, doc_body)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (username, doc_type, court_name, applicant_name, opposite_party, case_number, doc_body))
+
+def update_user_draft(draft_id, court_name, applicant_name, opposite_party, case_number, doc_body):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        c.execute("""
+            UPDATE drafts
+            SET court_name = ?, applicant_name = ?, opposite_party = ?, case_number = ?, doc_body = ?
+            WHERE id = ?
+        """, (court_name, applicant_name, opposite_party, case_number, doc_body, draft_id))
+
+def get_user_drafts(username, search_query="", is_admin=False):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        query = "%" + search_query + "%"
+        if is_admin:
+            c.execute("""
+                SELECT id, username, doc_type, applicant_name, created_at, court_name, opposite_party, case_number, doc_body
+                FROM drafts
+                WHERE applicant_name LIKE ? OR doc_type LIKE ? OR case_number LIKE ?
+                ORDER BY created_at DESC
+            """, (query, query, query))
+        else:
+            c.execute("""
+                SELECT id, username, doc_type, applicant_name, created_at, court_name, opposite_party, case_number, doc_body
+                FROM drafts
+                WHERE username = ? AND (applicant_name LIKE ? OR doc_type LIKE ? OR case_number LIKE ?)
+                ORDER BY created_at DESC
+            """, (username, query, query, query))
+        return c.fetchall()
+
+def delete_user_draft(draft_id, username, is_admin=False):
+    with sqlite3.connect(DB_FILE) as conn:
+        c = conn.cursor()
+        if is_admin:
+            c.execute("DELETE FROM drafts WHERE id = ?", (draft_id,))
+        else:
+            c.execute("DELETE FROM drafts WHERE id = ? AND username = ?", (draft_id, username))
+# ── SESSION STATE ──────────────────────────────────────────────────
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+if "username" not in st.session_state:
+    st.session_state["username"] = ""
+if "role" not in st.session_state:
+    st.session_state["role"] = ""
+
+# ── SIDEBAR ────────────────────────────────────────────────────────
+with st.sidebar:
+    st.title("⚖️ લીગલ સોફ્ટવેર")
+
+    with st.expander("🔐 સાઇન-ઇન / એકાઉન્ટ", expanded=not st.session_state["logged_in"]):
+        if not st.session_state["logged_in"]:
+            auth_mode = st.radio("પસંદ કરો:", ["લોગિન (Login)", "નવું એકાઉન્ટ"])
+
+            if auth_mode == "લોગિન (Login)":
+                user_input = st.text_input("યુઝરનામ")
+                pass_input = st.text_input("પાસવર્ડ", type="password")
+                if st.button("🔓 લોગિન કરો", use_container_width=True, type="primary"):
+                    role = verify_user(user_input, pass_input)
+                    if role:
+                        st.session_state["logged_in"] = True
+                        st.session_state["username"] = user_input
+                        st.session_state["role"] = role
+                        st.success(f"જી આયા થી, {user_input}!")
+                        st.rerun()
+                    else:
+                        st.error("ખોટો યુઝરનામ અથવા પાસવર્ડ!")
+            else:
+                new_user = st.text_input("નવું યુઝરનામ")
+                new_pass = st.text_input("નવો પાસવર્ડ", type="password")
+                if st.button("📝 એકાઉન્ટ બનાવો", use_container_width=True):
+                    if new_user and new_pass:
+                        if register_user(new_user, new_pass):
+                            st.success("એકાઉન્ટ બની ગયું! હવે લોગિન કરો.")
+                        else:
+                            st.error("આ યુઝરનામ ઉપલબ્ધ નથી!")
+                    else:
+                        st.warning("બધી વિગતો ભરો.")
+        else:
+            st.success(f"👤 **{st.session_state['username']}** ({'Admin' if st.session_state['role'] == 'admin' else 'Client'})")
+            if st.button("🚪 લોગઆઉટ", use_container_width=True):
+                st.session_state["logged_in"] = False
+                st.session_state["username"] = ""
+                st.session_state["role"] = ""
+                st.rerun()
+
+    with st.expander("🗺️ જમીન & મહેસૂલી પોર્ટલ્સ"):
+        st.link_button("🌐 AnyRoR (૭/૧૨, ૮-અ)", "https://anyror.gujarat.gov.in/", use_container_width=True)
+        st.link_button("🏛️ i-ORA (N.A., જમીન માપણી)", "https://iora.gujarat.gov.in/", use_container_width=True)
+        st.link_button("📜 Garvi 2.0 (ઇન્ડેક્સ-૨)", "https://garvi.gujarat.gov.in/", use_container_width=True)
+        st.link_button("📑 ઇ-ધરા (૬ નંબર નોંધો)", "https://edhara.gujarat.gov.in/", use_container_width=True)
+        st.link_button("💳 Cyber Treasury", "https://www.treasury.gujarat.gov.in/", use_container_width=True)
+
+    with st.expander("⚖️ ઈ-કોર્ટ્સ & સરકારી પોર્ટલ"):
+        st.link_button("⚖️ e-Courts India", "https://services.ecourts.gov.in/", use_container_width=True)
+        st.link_button("🏛️ ગુજરાત હાઇકોર્ટ", "https://gujarathighcourt.nic.in/", use_container_width=True)
+        st.link_button("📢 સરકાર વિજ્ઞાપન પોર્ટલ (Gudip)", "https://gudip.gujarat.gov.in/", use_container_width=True)
+        st.link_button("📋 Digital Gujarat", "https://www.digitalgujarat.gov.in", use_container_width=True)
+        st.link_button("🌾 i-Khedut પોર્ટલ", "https://ikhedut.gujarat.gov.in/", use_container_width=True)
+        st.link_button("📢 SWAGAT Online", "https://swagat.gujarat.gov.in/", use_container_width=True)
+
+    with st.expander("🎁 સરકારી યોજનાઓ (જન કલ્યાણ)"):
+        st.link_button("📜 ડીજીટલ ગુજરાત પેન્શન પોર્ટલ", "https://www.digitalgujarat.gov.in/", use_container_width=True)
+        st.link_button("🏥 આયુષ્માન ભારત યોજના", "https://beneficiary.nha.gov.in/", use_container_width=True)
+        st.link_button("🏠 પ્રધાનમંત્રી આવાસ યોજના", "https://pmaymis.gov.in/", use_container_width=True)
+
+# ── HEADER ─────────────────────────────────────────────────────────
+st.title("🏛️ ગુજરાત લીગલ પોર્ટલ 🏛️")
+st.caption("⚖️ ગુજરાત હાઇકોર્ટ & મહેસૂલી ડ્રાફ્ટિંગ પોર્ટલ | 🔒 A4 સાઇઝ અને સત્તાવાર કાનૂની ફોર્મેટિંગ મુજબ | Updated v7.0")
+st.divider()
+
+# ── TEMPLATES (CATEGORIZED) ────────────────────────────────────────
+TEMPLATE_CATEGORIES = {
+    "🏡 જમીન / મિલકત": {
+        "જમીન / મકાન બાનાખત કરારપત્ર (Banakhat)":
+"""બાનાખત કરારપત્રક
+
+પ્રથમ પક્ષકાર (વેચાણ આપનાર): ____________
+બીજો પક્ષકાર (વેચાણ રાખનાર): ____________
+
+આજ રોજ તારીખ: __/__/૨૦૨૬ ના દિવસે અમો પ્રથમ પક્ષકાર આથી બીજા પક્ષકારને લખાણ કરી આપીએ છીએ કે:
+
+૧. અમો માલિકી અને કબજા ભોગવટાની મિલકત/જમીન મોજે ગામ: ________, સર્વે/બ્લોક નંબર: ________, જેનું ક્ષેત્રફળ: ________ છે, તે બીજા પક્ષકારને કુલ રૂ. ________/- માં વેચાણ આપવાનું નક્કી કરેલ છે.
+
+૨. જે પેટે આજ રોજ બાનાની રકમ રૂ. ________/- (અક્ષરે રૂ. ____________________________) રોકડા/ચેક/UPI મારફતે મેળવેલ છે.
+
+૩. બાકી નીકળતી રકમ રૂ. ________/- આખરી દસ્તાવેજ નોંધણી સમયે ચૂકવવાની રહેશે.
+
+સાક્ષીઓ:
+૧. _____________________
+૨. _____________________
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "મકાન / દુકાન ભાડા કરારપત્ર (Rent Agreement)":
+"""મકાન / દુકાન ભાડા કરારપત્રક
+
+મકાન માલિક (પ્રથમ પક્ષકાર): ____________
+ભાડુઆત (બીજો પક્ષકાર): ____________
+
+આજ રોજ તારીખ: __/__/૨૦૨૬ ના રોજ નક્કી કરેલ શરતો:
+
+૧. પ્રથમ પક્ષકારની માલિકીનું મકાન/દુકાન સરનામું: ____________________________________ બીજા પક્ષકારને માસિક ભાડેથી આપેલ છે.
+૨. માસિક ભાડું રૂ. ________/- નક્કી કરેલ છે, જે દર મહિનાની ૧ થી ૫ તારીખમાં ચૂકવવાનું રહેશે.
+૩. ડિપોઝિટ પેટે રૂ. ________/- એડવાન્સ આપેલ છે.
+૪. કરારની મુદત ૧૧ (અગિયાર) મહિનાની રહેશે.
+
+સાક્ષીઓ:
+૧. _____________________
+૨. _____________________""",
+
+        "જમીન ટાઈટલ ક્લીયર અને ૨૫% સફળતા ફી કરારપત્ર":
+"""ટાઈટલ ક્લીયરન્સ અને સફળતા ફી કરારપત્રક
+
+પ્રથમ પક્ષકાર (જમીન માલિક): ____________
+બીજો પક્ષકાર (એડવોકેટ / એજન્ટ): ____________
+
+૧. મોજે ગામ: ________ ના સર્વે નંબર: ________ ની જમીનના ટાઈટલ ક્લીયર કરવાની કામગીરી બીજા પક્ષકારને સોંપવામાં આવે છે.
+૨. કામગીરી સફળતાપૂર્વક પૂર્ણ થયેથી જમીનની નક્કી કરેલ કિંમત અથવા સફળતા પેટે ૨૫% ફી ચૂકવવાની રહેશે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "ટીપ્પણી / ગામનો નકશો મેળવવાની અરજી":
+"""શ્રીમાન DILR સાહેબશ્રી / મામલતદાર સાહેબશ્રી,
+તાલુકા સેવા સદન, ____________
+
+વિષય: જમીનની ટીપ્પણી (Tippan) તથા ગામનો નકશો મેળવવા બાબત.
+જમીનની વિગત: મોજે ગામ: ________, સર્વે/બ્લોક નંબર: ________, ખાતા નંબર: ________.
+
+સાહેબશ્રી,
+ઉપરોક્ત દર્શાવેલ જમીન મારી સ્વતંત્ર/સંયુક્ત માલિકીની છે. સદર જમીનની હદ અને માપણીની ખાતરી કરવા માટે મારે કચેરીના રેકોર્ડ પરથી ટીપ્પણી / FMB નકશાની પ્રમાણિત નકલની જરૂરિયાત છે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "જમીન માપણી / પુનઃ માપણી અરજી":
+"""શ્રીમાન DILR સાહેબશ્રી (જિલ્લા નિરીક્ષક જમીન દફતર),
+કચેરી સરનામું: ____________
+
+વિષય: મોજે ગામ: ________ ના સર્વે/બ્લોક નંબર: ________ ની જમીન માપણી કરવા બાબત.
+
+સવિનય જણાવવાનું કે, ઉપરોક્ત સર્વે નંબરની જમીનની હદ નક્કી કરવા તથા શેજમીન ચકાસવા માટે સ્થળ પર માપણી કરાવવી જરૂરી છે. નિયમાનુસારની માપણી ફી ભરી અરજી સ્વીકારવા નમ્ર વિનંતી છે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "૬ નંબરની નોંધ સામે વાંધા અરજી":
+"""શ્રીમાન મામલતદાર સાહેબશ્રી,
+તાલુકા સેવા સદન, ____________
+
+વિષય: ઇ-ધરા કચેરીની ફેરફાર નોંધ નંબર: ______ સામે વાંધો નોંધાવવા બાબત.
+
+સવિનય જણાવવાનું કે, મોજે ગામ: ________ ની જમીન સર્વે/બ્લોક નંબર: ________ માં સામાવાળાએ ખોટી રીતે ફેરફાર નોંધ પાડાવેલ છે. સદર નોંધ રદ્દ કરવાનો હુકમ કરવા નમ્ર વિનંતી છે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "બિન-ખેતી (N.A.) પરવાનગી અરજી":
+"""શ્રીમાન કલેક્ટર સાહેબશ્રી / પ્રાંત અધિકારી સાહેબશ્રી,
+જિલ્લા કલેક્ટર કચેરી, ____________
+
+વિષય: મોજે ગામ: ________ ના સર્વે નંબર: ________ ની જમીન બિન-ખેતી (N.A.) કરવા બાબત.
+
+સાહેબશ્રી,
+અરજદારની માલિકીની ખેતીની જમીન સર્વે નંબર: ________ ને રહેણાંક / વાણિજ્ય / ઔદ્યોગિક હેતુ માટે બિન-ખેતીમાં રૂપાંતરિત કરવા બિન-ખેતી પરવાનગી આપવા વિનંતી.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "હક્કપત્રક / મ્યુટેશન (નામ દાખલ કરવા) અરજી":
+"""શ્રીમાન મામલતદાર સાહેબશ્રી,
+તાલુકા સેવા સદન, ____________
+
+વિષય: મોજે ગામ: ________, સર્વે/બ્લોક નંબર: ________ માં વારસાઈ/વેચાણ/હક્કપત્રક અન્વયે નામ દાખલ કરવા બાબત.
+
+સાહેબશ્રી,
+ઉપરોક્ત જમીનમાં _____________ ના નામે હક્ક પ્રસ્થાપિત થયેલ હોય, ૭/૧૨ અને ૮-અ ના રેકોર્ડમાં નામ દાખલ કરી ફેરફાર નોંધ પ્રમાણિત કરવા નમ્ર વિનંતી છે. જરૂરી પુરાવા/દસ્તાવેજની નકલો સામેલ છે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "ભાડુઆતને મકાન/દુકાન ખાલી કરવા નોટિસ (Eviction Notice)":
+"""નોટિસ
+
+પ્રતિ,
+______________________ (ભાડુઆતનું નામ)
+સરનામું: ____________________________________
+
+વિષય: ભાડાની મિલકત ખાલી કરી આપવા બાબતની નોટિસ.
+
+તમે ઉપરોક્ત મિલકતમાં તારીખ __/__/____ થી માસિક ભાડા કરાર અન્વયે રહો છો. કરારની મુદત પૂર્ણ થયેલ/ભાડું બાકી હોવાના કારણોસર, આ નોટિસ મળ્યેથી ૧૫ (પંદર) દિવસની અંદર મિલકતનો કબજો ખાલી કરી સોંપી આપવા જણાવવામાં આવે છે, નહીં તો કાયદેસરના પગલાં લેવામાં આવશે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬
+મકાન માલિકની સહી: _____________________""",
+    },
+
+    "💰 નાણાકીય કરાર": {
+        "વ્યાજે નાણા આપવા અને ગીરવે લખાણનો કરાર":
+"""ઉછીના નાણાં લીધા અંગેનું ગેરંટી તથા ગીરવે લખાણ કરારપત્રક
+
+નાણા આપનાર (પ્રથમ પક્ષકાર/લેણદાર): ____________
+નાણા લેનાર (બીજો પક્ષકાર/દેવાદાર): ____________
+
+આજ રોજ તારીખ: __/__/૨૦૨૬ ના દિવસે અમો કરાર કરનાર બીજો પક્ષકાર (નાણા લેનાર) આથી લખાણ કરી આપું છું કે:
+
+૧. અમોને મારા અંગત/ધંધાકીય કામ અર્થે નાણાંની જરૂરિયાત હોવાથી અમોએ પ્રથમ પક્ષકાર પાસેથી રૂ. ________/- (અક્ષરે રૂ. ____________________________) વ્યાજે/ઉછીના રોકડા/ચેક/UPI મારફતે મેળવેલ છે.
+
+૨. આ રકમ ઉપર માસિક ____% (અથવા વાર્ષિક ____%) લેખે દર મહિને નિયમિત વ્યાજ ચૂકવવાનું નક્કી કરેલ છે.
+
+૩. ગેરંટી અને સિક્યુરિટી પેટે અમોએ નીચે મુજબની વસ્તુ/મિલકત પ્રથમ પક્ષકાર પાસે ગીરવે/કબજામાં રાખેલ છે:
+   - ગીરવે મુકેલ વસ્તુ/મિલકતની વિગત: _____________________________________
+
+સાક્ષીઓ:
+૧. _____________________
+૨. _____________________""",
+
+        "પાવર ઓફ એટર્ની / સત્તા પત્ર":
+"""સામાન્ય મુખત્યારનામું (Power of Attorney)
+
+હું, ____________ (સત્તા આપનાર), રહેવાસી ____________________________, આથી ____________ (સત્તા મેળવનાર) ને મારા વતી નીચે મુજબની બાબતોમાં કામ કરવા સંપૂર્ણ સત્તા આપું છું:
+
+૧. મારી માલિકીની જમીન/મિલકત મોજે ગામ: ________, સર્વે નંબર: ________ સંબંધિત સરકારી કચેરીઓમાં અરજી, દસ્તાવેજ રજૂ કરવા તથા સહી કરવા.
+૨. જરૂર જણાય તો બેંક/કોર્ટ સંબંધિત કામગીરી માટે મારા વતી હાજર રહેવા.
+
+આ મુખત્યારનામું આજથી અમલમાં આવશે અને હું રદ ન કરું ત્યાં સુધી ચાલુ રહેશે.
+
+સાક્ષીઓ:
+૧. _____________________
+૨. _____________________
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "ભેટ દસ્તાવેજ (Gift Deed)":
+"""ભેટ દસ્તાવેજ (Gift Deed)
+
+ભેટ આપનાર (દાતા): ____________
+ભેટ મેળવનાર (ગ્રહીતા): ____________
+
+હું, દાતા, મારી સ્વ-કમાયેલ/વારસાગત મિલકત મોજે ગામ: ________, સર્વે નંબર: ________ કોઈપણ જાતના મહેનતાણા વગર, મારી સ્વેચ્છાએ અને પ્રેમભાવથી ________ (સંબંધ: ____________) ને ભેટ સ્વરૂપે આપું છું.
+
+આ ભેટ સ્વીકારવામાં આવે છે અને આજથી મિલકતનો કબજો ભેટ મેળવનારને સોંપવામાં આવે છે.
+
+સાક્ષીઓ:
+૧. _____________________
+૨. _____________________
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+    },
+
+    "📢 અરજી / વાંધા / ફરિયાદ": {
+        "વાંધા અરજી (Objection Application)":
+"""અરજદારશ્રી તરફથી નીચે મુજબની વાંધા અરજી સવિનય રજૂ કરવામાં આવે છે:
+
+૧. સામાવાળા તરફથી કરવામાં આવેલ રજૂઆત/અરજી કાયદાકીય રીતે ટકી શકે તેમ નથી.
+૨. સદર બાબતમાં અરજદારના કાયદેસરના હક્ક રહેલા છે. સામાવાળાની અરજી રદ્દ કરવા નમ્ર વિનંતી.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "પોલીસ ફરિયાદ / લેખિત અરજી":
+"""પ્રતિ,
+શ્રીમાન પોલીસ ઇન્સપેક્ટર સાહેબશ્રી,
+પોલીસ સ્ટેશન: ____________
+
+વિષય: ____________________________________ બાબતે ફરિયાદ નોંધાવવા બાબત.
+
+સાહેબશ્રી,
+સવિનય જણાવવાનું કે તારીખ __/__/____ ના રોજ, સ્થળ ____________ ખાતે નીચે મુજબનો બનાવ બનેલ છે:
+
+____________________________________________________________________________
+____________________________________________________________________________
+
+તકેદારીના ભાગરૂપે અને કાયદેસરની કાર્યવાહી કરવા આ અરજી/ફરિયાદ રજૂ કરું છું. યોગ્ય તપાસ કરી ન્યાય આપવા નમ્ર વિનંતી છે.
+
+અરજદારનું નામ: ____________
+મોબાઈલ નંબર: ____________
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "RTI અરજી (માહિતી અધિકાર અધિનિયમ)":
+"""પ્રતિ,
+જાહેર માહિતી અધિકારીશ્રી,
+કચેરીનું નામ: ____________
+
+વિષય: માહિતી અધિકાર અધિનિયમ, ૨૦૦૫ હેઠળ માહિતી મેળવવા બાબત.
+
+સાહેબશ્રી,
+હું, અરજદાર, માહિતી અધિકાર અધિનિયમ, ૨૦૦૫ ની કલમ ૬ હેઠળ નીચે મુજબની માહિતી/દસ્તાવેજોની પ્રમાણિત નકલ મેળવવા ઈચ્છું છું:
+
+૧. ____________________________________________________________________
+૨. ____________________________________________________________________
+
+નિયમાનુસારની ફી રૂ. ૨૦/- (સાથે જોડેલ છે). નિયત સમય મર્યાદામાં માહિતી પૂરી પાડવા વિનંતી.
+
+અરજદારનું નામ: ____________
+સરનામું: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "કોર્ટમાં મનાઈ હુકમ (સ્ટે) અરજી":
+"""મેહરબાન કોર્ટ સાહેબશ્રી સમક્ષ,
+
+વિષય: પ્રતિવાદી સામે મનાઈ હુકમ (Stay/Injunction) મેળવવા બાબતની અરજી.
+
+સાહેબશ્રી,
+ઉપરોક્ત કેસમાં અરજદારની માલિકી/કબજાની મિલકતમાં પ્રતિવાદી તરફથી ગેરકાયદેસર દખલગીરી/નુકસાન થવાની શક્યતા હોય, જ્યાં સુધી કેસનો અંતિમ નિકાલ ન થાય ત્યાં સુધી પ્રતિવાદીને મિલકતમાં કોઈપણ પ્રકારની દખલગીરી ન કરવા મનાઈ હુકમ ફરમાવવા નમ્ર વિનંતી છે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "જામીન અરજી (Bail Application)":
+"""મેહરબાન કોર્ટ સાહેબશ્રી સમક્ષ,
+
+વિષય: આરોપીને જામીન પર મુક્ત કરવા બાબતની અરજી.
+
+સાહેબશ્રી,
+આરોપી ____________ સામે ગુન્હા નંબર ________, પોલીસ સ્ટેશન ____________ હેઠળ કાર્યવાહી ચાલુ છે. આરોપી પ્રથમ વખતનો ગુન્હેગાર છે, તપાસમાં પૂરેપૂરો સહકાર આપશે અને પુરાવા સાથે ચેડાં કરવાની શક્યતા નથી. તેથી આરોપીને યોગ્ય શરતોએ જામીન પર મુક્ત કરવા નમ્ર વિનંતી છે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+    },
+
+    "📜 પ્રમાણપત્ર / યોજના": {
+        "આવકનો દાખલો મેળવવા અરજી (Income Certificate)":
+"""શ્રીમાન મામલતદાર સાહેબશ્રી,
+તાલુકા સેવા સદન, ____________
+
+વિષય: આવકનો દાખલો (Income Certificate) મેળવવા બાબત.
+
+સાહેબશ્રી,
+અરજદારના કુટુંબની વાર્ષિક આવક રૂ. ________/- છે, જે __________ હેતુ માટે જરૂરી હોય, આવકનો દાખલો કાઢી આપવા નમ્ર વિનંતી છે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "જાતિનો દાખલો મેળવવા અરજી (Caste Certificate)":
+"""શ્રીમાન મામલતદાર સાહેબશ્રી,
+તાલુકા સેવા સદન, ____________
+
+વિષય: જાતિનો દાખલો (Caste Certificate) મેળવવા બાબત.
+
+સાહેબશ્રી,
+અરજદાર ________ જ્ઞાતિ (____________ - SC/ST/OBC/General) નો છે, જે __________ હેતુ માટે જરૂરી હોય, જાતિનો દાખલો કાઢી આપવા નમ્ર વિનંતી છે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "રહેઠાણનો દાખલો મેળવવા અરજી (Domicile Certificate)":
+"""શ્રીમાન મામલતદાર સાહેબશ્રી,
+તાલુકા સેવા સદન, ____________
+
+વિષય: રહેઠાણ/વસવાટનો દાખલો (Domicile Certificate) મેળવવા બાબત.
+
+સાહેબશ્રી,
+અરજદાર છેલ્લા ______ વર્ષોથી ____________ ખાતે કાયમી રહેવાસી છે, જે __________ હેતુ માટે જરૂરી હોય, રહેઠાણનો દાખલો કાઢી આપવા નમ્ર વિનંતી છે.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+
+        "નિરાધાર વરિષ્ઠ નાગરિક પેન્શન યોજના અરજી":
+"""શ્રીમાન મામલતદાર સાહેબશ્રી,
+તાલુકા સેવા સદન, ____________
+
+વિષય: નિરાધાર વરિષ્ઠ નાગરિક સહાય (પેન્શન) યોજના હેઠળ લાભ મળવા બાબત.
+
+સાહેબશ્રી,
+અરજદારની ઉંમર ૬૦ વર્ષથી વધુ છે અને આવક મર્યાદામાં છે. સંભાળ રાખનાર કોઈ આધાર ન હોય, વરિષ્ઠ નાગરિક પેન્શન મંજૂર કરવા વિનંતી.
+
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+    },
+
+    "✍️ મેન્યુઅલ / કસ્ટમ અરજી": {
+        "ખાલી ટેમ્પલેટ (તમારી પોતાની અરજી લખો)":
+"""પ્રતિ,
+શ્રીમાન ____________ સાહેબશ્રી,
+કચેરીનું નામ: ____________
+
+વિષય: ____________________________________________________________
+
+સાહેબશ્રી,
+સવિનય જણાવવાનું કે,
+
+____________________________________________________________________________
+____________________________________________________________________________
+____________________________________________________________________________
+____________________________________________________________________________
+
+ઉપરોક્ત બાબતે યોગ્ય કાર્યવાહી કરવા નમ્ર વિનંતી છે.
+
+અરજદારનું નામ: ____________
+મોબાઈલ નંબર: ____________
+સ્થળ: ____________
+તારીખ: __/__/૨૦૨૬""",
+    },
+}
+# ── GOVERNMENT PORTAL LINKS PER DOCUMENT TYPE ──────────────────────
+# Each entry: doc_name -> list of (label, url) buttons shown next to that draft.
+DOC_PORTAL_LINKS = {
+    "જમીન / મકાન બાનાખત કરારપત્ર (Banakhat)": [
+        ("🌐 AnyRoR (૭/૧૨, ૮-અ ચકાસો)", "https://anyror.gujarat.gov.in/"),
+        ("💳 Cyber Treasury (સ્ટેમ્પ ડ્યુટી)", "https://www.treasury.gujarat.gov.in/"),
+    ],
+    "મકાન / દુકાન ભાડા કરારપત્ર (Rent Agreement)": [
+        ("💳 Cyber Treasury (સ્ટેમ્પ ડ્યુટી)", "https://www.treasury.gujarat.gov.in/"),
+    ],
+    "જમીન ટાઈટલ ક્લીયર અને ૨૫% સફળતા ફી કરારપત્ર": [
+        ("📜 Garvi 2.0 (ઇન્ડેક્સ-૨)", "https://garvi.gujarat.gov.in/"),
+        ("🌐 AnyRoR (૭/૧૨, ૮-અ)", "https://anyror.gujarat.gov.in/"),
+    ],
+    "ટીપ્પણી / ગામનો નકશો મેળવવાની અરજી": [
+        ("🏛️ i-ORA પોર્ટલ", "https://iora.gujarat.gov.in/"),
+        ("🌐 AnyRoR", "https://anyror.gujarat.gov.in/"),
+    ],
+    "જમીન માપણી / પુનઃ માપણી અરજી": [
+        ("🏛️ i-ORA પોર્ટલ (માપણી અરજી)", "https://iora.gujarat.gov.in/"),
+    ],
+    "૬ નંબરની નોંધ સામે વાંધા અરજી": [
+        ("📑 ઇ-ધરા પોર્ટલ", "https://edhara.gujarat.gov.in/"),
+    ],
+    "બિન-ખેતી (N.A.) પરવાનગી અરજી": [
+        ("🏛️ i-ORA પોર્ટલ (N.A. અરજી)", "https://iora.gujarat.gov.in/"),
+    ],
+    "હક્કપત્રક / મ્યુટેશન (નામ દાખલ કરવા) અરજી": [
+        ("📑 ઇ-ધરા પોર્ટલ", "https://edhara.gujarat.gov.in/"),
+        ("🌐 AnyRoR (ચકાસણી)", "https://anyror.gujarat.gov.in/"),
+    ],
+    "ભાડુઆતને મકાન/દુકાન ખાલી કરવા નોટિસ (Eviction Notice)": [
+        ("⚖️ e-Courts India", "https://services.ecourts.gov.in/"),
+    ],
+    "વ્યાજે નાણા આપવા અને ગીરવે લખાણનો કરાર": [
+        ("💳 Cyber Treasury (સ્ટેમ્પ ડ્યુટી)", "https://www.treasury.gujarat.gov.in/"),
+    ],
+    "પાવર ઓફ એટર્ની / સત્તા પત્ર": [
+        ("💳 Cyber Treasury (સ્ટેમ્પ ડ્યુટી)", "https://www.treasury.gujarat.gov.in/"),
+    ],
+    "ભેટ દસ્તાવેજ (Gift Deed)": [
+        ("📜 Garvi 2.0 (નોંધણી)", "https://garvi.gujarat.gov.in/"),
+    ],
+    "વાંધા અરજી (Objection Application)": [
+        ("📢 SWAGAT ઓનલાઈન", "https://swagat.gujarat.gov.in/"),
+    ],
+    "પોલીસ ફરિયાદ / લેખિત અરજી": [
+        ("📢 SWAGAT ઓનલાઈન", "https://swagat.gujarat.gov.in/"),
+    ],
+    "RTI અરજી (માહિતી અધિકાર અધિનિયમ)": [
+        ("📋 Digital Gujarat", "https://www.digitalgujarat.gov.in"),
+    ],
+    "કોર્ટમાં મનાઈ હુકમ (સ્ટે) અરજી": [
+        ("⚖️ e-Courts India", "https://services.ecourts.gov.in/"),
+        ("🏛️ ગુજરાત હાઇકોર્ટ", "https://gujarathighcourt.nic.in/"),
+    ],
+    "જામીન અરજી (Bail Application)": [
+        ("⚖️ e-Courts India", "https://services.ecourts.gov.in/"),
+        ("🏛️ ગુજરાત હાઇકોર્ટ", "https://gujarathighcourt.nic.in/"),
+    ],
+    "આવકનો દાખલો મેળવવા અરજી (Income Certificate)": [
+        ("📋 Digital Gujarat", "https://www.digitalgujarat.gov.in"),
+    ],
+    "જાતિનો દાખલો મેળવવા અરજી (Caste Certificate)": [
+        ("📋 Digital Gujarat", "https://www.digitalgujarat.gov.in"),
+    ],
+    "રહેઠાણનો દાખલો મેળવવા અરજી (Domicile Certificate)": [
+        ("📋 Digital Gujarat", "https://www.digitalgujarat.gov.in"),
+    ],
+    "નિરાધાર વરિષ્ઠ નાગરિક પેન્શન યોજના અરજી": [
+        ("📋 Digital Gujarat (પેન્શન)", "https://www.digitalgujarat.gov.in/"),
+    ],
+    "ખાલી ટેમ્પલેટ (તમારી પોતાની અરજી લખો)": [
+        ("📋 Digital Gujarat", "https://www.digitalgujarat.gov.in"),
+        ("📢 SWAGAT ઓનલાઈન", "https://swagat.gujarat.gov.in/"),
+    ],
+}
+
+# Flat lookup used by the rest of the app
+TEMPLATES = {}
+for _cat, _docs in TEMPLATE_CATEGORIES.items():
+    TEMPLATES.update(_docs)
+
+# ── WORD GENERATOR ─────────────────────────────────────────────────
+def generate_docx(court_name, selected_doc, case_number, applicant_name, opposite_party, doc_body):
+    doc = Document()
+
+    section = doc.sections[0]
+    section.page_height = Cm(29.7)
+    section.page_width = Cm(21.0)
+    section.top_margin = Cm(2.0)
+    section.bottom_margin = Cm(2.0)
+    section.left_margin = Cm(4.0)
+    section.right_margin = Cm(4.0)
+
+    p_head = doc.add_paragraph()
+    p_head.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run_head = p_head.add_run(f"મેહરબાન {court_name} માં\n")
+    run_head.bold = True
+    run_head.font.size = Pt(14)
+
+    if case_number:
+        p_case = doc.add_paragraph()
+        p_case.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run_case = p_case.add_run(f"{case_number}\n")
+        run_case.font.size = Pt(12)
+
+    p_party = doc.add_paragraph()
+    p_party.paragraph_format.line_spacing = 1.5
+    run_party = p_party.add_run(f"અરજદાર / પ્રથમ પક્ષકાર: {applicant_name}\nવિરુદ્ધ / અને\nસામાવાળા / બીજો પક્ષકાર: {opposite_party}\n")
+    run_party.font.size = Pt(13)
+
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run_title = p_title.add_run(f"\n:: {selected_doc.split('(')[0]} ::\n")
+    run_title.bold = True
+    run_title.font.size = Pt(14)
+
+    p_body = doc.add_paragraph()
+    p_body.paragraph_format.line_spacing = 1.5
+    run_body = p_body.add_run(doc_body)
+    run_body.font.size = Pt(13)
+
+    p_sign = doc.add_paragraph()
+    p_sign.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p_sign.paragraph_format.space_before = Pt(30)
+    run_sign = p_sign.add_run(f"\n\n_____________________\n({applicant_name})\nઅરજદાર / પક્ષકારની સહી")
+    run_sign.font.size = Pt(13)
+
+    target_stream = io.BytesIO()
+    doc.save(target_stream)
+    return target_stream.getvalue()
+
+# ── TABS ───────────────────────────────────────────────────────────
+tab1, tab2 = st.tabs(["📝 નવો ડ્રાફ્ટ બનાવો", "📁 સાચવેલા દસ્તાવેજો & એડિટિંગ"])
+
+with tab1:
+    st.subheader("📝 પહેલા દસ્તાવેજ/અરજીનો પ્રકાર પસંદ કરો")
+
+    # Step 1: category selector (pill buttons)
+    if "doc_category" not in st.session_state:
+        st.session_state.doc_category = list(TEMPLATE_CATEGORIES.keys())[0]
+
+    cat_cols = st.columns(len(TEMPLATE_CATEGORIES), gap="small")
+    for col, cat_name in zip(cat_cols, TEMPLATE_CATEGORIES.keys()):
+        with col:
+            st.markdown('<div class="cat-btn">', unsafe_allow_html=True)
+            is_sel = st.session_state.doc_category == cat_name
+            if st.button(cat_name, key=f"cat_{cat_name}", use_container_width=True,
+                         type="primary" if is_sel else "secondary"):
+                st.session_state.doc_category = cat_name
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    current_cat_docs = TEMPLATE_CATEGORIES[st.session_state.doc_category]
+    doc_names = list(current_cat_docs.keys())
+
+    # Step 2: document selector (big buttons, 2 per row)
+    if "selected_doc" not in st.session_state or st.session_state.selected_doc not in TEMPLATES:
+        st.session_state.selected_doc = doc_names[0]
+    if st.session_state.selected_doc not in doc_names:
+        st.session_state.selected_doc = doc_names[0]
+
+    st.write("")
+    doc_cols = st.columns(2, gap="medium")
+    for i, doc_name in enumerate(doc_names):
+        with doc_cols[i % 2]:
+            is_sel_doc = st.session_state.selected_doc == doc_name
+            if st.button(doc_name, key=f"doc_{doc_name}", use_container_width=True,
+                         type="primary" if is_sel_doc else "secondary"):
+                st.session_state.selected_doc = doc_name
+                st.rerun()
+
+    selected_doc = st.session_state.selected_doc
+    st.success(f"✅ પસંદ કરેલ દસ્તાવેજ: **{selected_doc}**")
+
+    # Direct government-portal links relevant to this specific application
+    portal_links = DOC_PORTAL_LINKS.get(selected_doc, [])
+    if portal_links:
+        st.markdown("**🌐 આ અરજી માટે સંબંધિત સરકારી પોર્ટલ (ડાયરેક્ટ ખૂલશે):**")
+        link_cols = st.columns(len(portal_links), gap="small")
+        for lcol, (label, url) in zip(link_cols, portal_links):
+            with lcol:
+                st.link_button(label, url, use_container_width=True)
+
+    st.divider()
+
+    col_input, col_preview = st.columns([1.1, 0.9], gap="large")
+
+    with col_input:
+        st.subheader("🖊️ વિગતો ભરો")
+
+        court_name = st.text_input("કોર્ટ / કચેરી / ઓથોરિટીનું નામ:", "DILR કચેરી / મામલતદાર કચેરી / ગુજરાત હાઇકોર્ટ")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            applicant_name = st.text_input("અરજદાર / નાણા આપનારનું નામ:", "મહેશભાઈ વિનોદભાઇ રામાવત")
+        with c2:
+            opposite_party = st.text_input("સામાવાળા / નાણા લેનારનું નામ:", "સામાવાળાનું નામ")
+
+        case_number = st.text_input("કેસ / નોટિસ / રેકોર્ડ નંબર:", "સર્વે/કરાર નંબર: ૧૨૩/૧")
+
+        st.subheader("📄 કાનૂની લખાણ (ડ્રાફ્ટિંગ)")
+        doc_body = st.text_area("મુખ્ય લખાણ:", value=TEMPLATES[selected_doc], height=280, key=f"body_{selected_doc}")
+
+        if st.session_state["logged_in"]:
+            if st.button("💾 પ્રાઇવેટ એકાઉન્ટમાં સેવ કરો", use_container_width=True, type="primary"):
+                save_user_draft(
+                    st.session_state["username"], selected_doc, court_name,
+                    applicant_name, opposite_party, case_number, doc_body
+                )
+                st.success("✅ દસ્તાવેજ સફળતાપૂર્વક સેવ થઈ ગયો!")
+        else:
+            st.info("ℹ️ દસ્તાવેજ સેવ કરવા માટે ડાબી બાજુથી લોગિન કરો.")
+
+    with col_preview:
+        st.subheader("👁️ પ્રિવ્યૂ અને ડાઉનલોડ")
+
+        docx_data = generate_docx(court_name, selected_doc, case_number, applicant_name, opposite_party, doc_body)
+
+        st.download_button(
+            label="📥 ૧. Word (.docx) ફાઇલ ડાઉનલોડ કરો",
+            data=docx_data,
+            file_name=f"{selected_doc.split(' ')[0]}_Document.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True
+        )
+
+        st.divider()
+        st.subheader("📄 ૨. ડાયરેક્ટ PDF પ્રિન્ટ કરો")
+
+        title_clean = selected_doc.split('(')[0]
+        formatted_body = doc_body.replace('\n', '<br/>')
+
+        print_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                .btn {{
+                    background-color: #ff4b4b;
+                    color: white;
+                    padding: 10px 20px;
+                    border: none;
+                    border-radius: 5px;
+                    font-size: 16px;
+                    cursor: pointer;
+                    width: 100%;
+                    font-weight: bold;
+                }}
+            </style>
+        </head>
+        <body>
+            <button class="btn" onclick="printDoc()">🖨️ આ દસ્તાવેજ PDF તરીકે સેવ કરો (Print / Save as PDF)</button>
+            <script>
+                function printDoc() {{
+                    var printWindow = window.open('', '', 'height=600,width=800');
+                    printWindow.document.write('<html><head><title>Legal Document</title>');
+                    printWindow.document.write('<style>');
+                    printWindow.document.write('@page {{ size: A4; margin-top: 20mm; margin-bottom: 20mm; margin-left: 40mm; margin-right: 40mm; }}');
+                    printWindow.document.write('body {{ font-family: sans-serif; font-size: 15px; line-height: 1.8; color: #000; }}');
+                    printWindow.document.write('.center {{ text-align: center; }}');
+                    printWindow.document.write('.right {{ text-align: right; margin-top: 40px; }}');
+                    printWindow.document.write('.title {{ text-align: center; font-size: 18px; font-weight: bold; margin: 20px 0; }}');
+                    printWindow.document.write('</style></head><body>');
+
+                    printWindow.document.write('<div class="center"><h3>મેહરબાન {court_name} માં</h3></div>');
+                    printWindow.document.write('<div class="center"><b>{case_number}</b></div><br/>');
+                    printWindow.document.write('<div><b>અરજદાર / પ્રથમ પક્ષકાર:</b> {applicant_name}<br/><b>વિરુદ્ધ / અને</b><br/><b>સામાવાળા / બીજો પક્ષકાર:</b> {opposite_party}</div>');
+                    printWindow.document.write('<div class="title">:: {title_clean} ::</div>');
+                    printWindow.document.write('<div>{formatted_body}</div>');
+                    printWindow.document.write('<div class="right">_____________________<br/>({applicant_name})<br/><b>અરજદાર / પક્ષકારની સહી</b></div>');
+
+                    printWindow.document.write('</body></html>');
+                    printWindow.document.close();
+                    printWindow.focus();
+                    setTimeout(function() {{ printWindow.print(); }}, 500);
+                }}
+            </script>
+        </body>
+        </html>
+        """
+        components.html(print_html, height=80)
+with tab2:
+    st.subheader("🔒 તમારા સુરક્ષિત દસ્તાવેજો")
+    if not st.session_state["logged_in"]:
+        st.warning("🔒 સાચવેલા દસ્તાવેજો જોવા માટે ડાબી બાજુ સાઇડબારમાંથી **લોગિન** કરો.")
+    else:
+        is_admin = (st.session_state["role"] == "admin")
+        search_q = st.text_input("🔍 જૂના કાગળો શોધો:", "")
+        drafts = get_user_drafts(st.session_state["username"], search_query=search_q, is_admin=is_admin)
+
+        if not drafts:
+            st.info("કોઈ સાચવેલા ડ્રાફ્ટ મળ્યા નથી.")
+        else:
+            for d in drafts:
+                draft_id, user_owner, d_type, app_name, c_time, c_name, opp_p, c_num, d_body = d
+                with st.expander(f"📜 {d_type} | અરજદાર: {app_name} | ({c_time})"):
+                    st.write(f"**યુઝર:** {user_owner}")
+                    edit_c_name = st.text_input("કોર્ટ/ઓથોરિટી:", value=c_name, key=f"cn_{draft_id}")
+
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        edit_app_name = st.text_input("અરજદાર:", value=app_name, key=f"an_{draft_id}")
+                    with ec2:
+                        edit_opp_p = st.text_input("સામાવાળા:", value=opp_p, key=f"op_{draft_id}")
+
+                    edit_c_num = st.text_input("કેસ/ખાતા/સર્વે નંબર:", value=c_num, key=f"cnum_{draft_id}")
+                    edit_d_body = st.text_area("લખાણ:", value=d_body, height=180, key=f"text_{draft_id}")
+
+                    col_save_btn, col_dl_btn, col_del_btn = st.columns([1, 1, 1])
+
+                    with col_save_btn:
+                        if st.button("✏️ સુધારા સેવ કરો", key=f"up_{draft_id}", type="primary"):
+                            update_user_draft(draft_id, edit_c_name, edit_app_name, edit_opp_p, edit_c_num, edit_d_body)
+                            st.success("સુધારો સેવ થઈ ગયો!")
+                            st.rerun()
+
+                    with col_dl_btn:
+                        saved_docx = generate_docx(edit_c_name, d_type, edit_c_num, edit_app_name, edit_opp_p, edit_d_body)
+                        st.download_button(
+                            label="📥 Word ડાઉનલોડ",
+                            data=saved_docx,
+                            file_name=f"Saved_{d_type.split(' ')[0]}_{draft_id}.docx",
+                            key=f"dl_{draft_id}"
+                        )
+
+                    with col_del_btn:
+                        if st.button("🗑️ ડિલીટ કરો", key=f"del_{draft_id}"):
+                            delete_user_draft(draft_id, st.session_state["username"], is_admin=is_admin)
+                            st.success("દસ્તાવેજ ડિલીટ થઈ ગયો!")
+                            st.rerun()
